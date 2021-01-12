@@ -63,7 +63,7 @@ class TSNet(nn.Module):
     def __init__(self, channels, dropout_rate=0.5, embed_dim=100):
         super(TSNet, self).__init__()
         self.embed_model = StagerNet(channels, dropout_rate=dropout_rate, embed_dim=embed_dim)
-        self.linear = nn.Linear(embed_dim, 1)
+        self.linear = nn.Linear(2*embed_dim, 1)
 
         self.dropout_rate = dropout_rate
         self.embed_dim = embed_dim
@@ -74,6 +74,13 @@ class TSNet(nn.Module):
         x3_embedded = self.embed_model(x3)
 
         # the torch.abs() is able to emulate the grp function in RP
+        # print("TSNet.forward: x1_embedded shape == ", x1_embedded.shape)
+        # print("TSNet.forward: x2_embedded shape == ", x2_embedded.shape)
+        # print("TSNet.forward: x3_embedded shape == ", x3_embedded.shape)
+        # print("TSNet.forward: torch.abs(x1_embedded - x2_embedded) shape == ", torch.abs(x1_embedded - x2_embedded).shape)
+        # print("TSNet.forward: torch.abs(x2_embedded - x3_embedded) shape == ", torch.abs(x2_embedded - x3_embedded).shape)
+        # print("TSNet.forward: torch.cat((torch.abs(x1_embedded - x2_embedded), torch.abs(x2_embedded - x3_embedded)), dim=-1) shape == ", torch.cat((torch.abs(x1_embedded - x2_embedded), torch.abs(x2_embedded - x3_embedded)), dim=-1).shape)
+        # raise Exception()
         out = self.linear(torch.cat((torch.abs(x1_embedded - x2_embedded), torch.abs(x2_embedded - x3_embedded)), dim=-1))
         return out
 
@@ -145,3 +152,43 @@ class CPCNet(nn.Module):
                     out[batch, sample, predicted] = self.bilinear_list[sample](hidden[batch, :], Xp[batch, sample, predicted, :])
         
         return out
+    
+    def custom_cpc_loss(self, input):
+        """
+        Runs a negative log softmax on the first column of the last index using the knowledge that this is where 
+        all the positive samples are
+
+        Input should be in the shape [batch, np, nb+1], the first index of nb+1 being the 'correct' one
+        """
+        NB_DIM = 2
+        CORRECT_INDEX = 0
+        loss_func = nn.LogSoftmax(dim=NB_DIM)
+        log_soft = loss_func(input)[:,:,CORRECT_INDEX]
+        return -torch.sum(log_soft)
+
+
+class DownstreamNet(nn.Module):
+    def __init__(self, embedders, classes, embed_dim=100):
+        """
+        Network for downstream prediction/classification tasks. Simply the embeder(s) and a final linear 
+        layer.
+
+        embedders: list of embedding models (trained/untrained and trainable/frozen)
+        classes: the total number of classes to be used in prediction/classification task
+        """
+        super(DownstreamNet, self).__init__()
+        self.BATCH_DIM_INDEX = 0
+        self.EMBED_DIM_INDEX = 1
+        self.embedders = nn.ModuleList()
+        for embedder in embedders:
+            self.embedders.append(embedder)
+        self.num_embedders = len(embedders)
+        self.linear = nn.Linear(self.num_embedders*embed_dim, classes)
+    
+    def forward(self, x):
+        if self.num_embedders == 1:
+            x = self.embedders[0](x)
+        else:
+            x_embeds = [self.embedders[i](x) for i in range(self.num_embedders)]
+            x = torch.cat(tuple(x_embeds), dim=self.EMBED_DIM_INDEX)
+        return self.linear(x)
