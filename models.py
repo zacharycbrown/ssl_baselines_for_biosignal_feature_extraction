@@ -179,18 +179,40 @@ class DownstreamNet(nn.Module):
         super(DownstreamNet, self).__init__()
         self.BATCH_DIM_INDEX = 0
         self.EMBED_DIM_INDEX = 1
+
+        self.embedder_types = []
         self.embedders = nn.ModuleList()
-        for embedder in embedders:
+        for embedder_type, embedder in embedders:
+            # print("DownstreamNet.__init__ : embedder_type == ", embedder_type)
+            if embedder_type not in ["RP", "TS", "CPC", "PS"]:
+                raise ValueError("Embedder type "+str(embedder_type)+" not supported")
+            self.embedder_types.append(embedder_type)
             self.embedders.append(embedder)
+
         self.num_embedders = len(embedders)
+        # print("DownstreamNet.__init__ : num_embedders == ", self.num_embedders)
         self.linear = nn.Linear(self.num_embedders*embed_dim, classes)
     
     def forward(self, x):
-        if self.num_embedders == 1:
-            x = self.embedders[0](x)
-        else:
-            x_embeds = [self.embedders[i](x) for i in range(self.num_embedders)]
-            x = torch.cat(tuple(x_embeds), dim=self.EMBED_DIM_INDEX)
+        # print("DownstreamNet.forward : x == ", x)
+        # if self.num_embedders == 1:
+        #     print("DownstreamNet.forward : RUNNING SINGLE EMBEDDER")
+        #     x = self.embedders[0](x)
+        # else:
+        # print("DownstreamNet.forward : RUNNING MULTIPLE EMBEDDERS")
+        x_embeds = []
+        for i in range(self.num_embedders):
+            embedded_x = None
+            if self.embedder_types[i] in ["RP", "TS", "CPC"]:
+                # print("\tDownstreamNet.forward : RUNNING RS, TS, OR CPC MODEL")
+                embedded_x = self.embedders[i](x)
+            else:
+                # print("\tDownstreamNet.forward : RUNNING PS MODEL")
+                _, embedded_x = self.embedders[i](x)
+            # print("DownstreamNet.forward : embedded_x shape == ", embedded_x.shape)
+            x_embeds.append(embedded_x)
+        x = torch.cat(tuple(x_embeds), dim=self.EMBED_DIM_INDEX)
+        # print("DownstreamNet.forward : x shape == ", x.shape)
         return self.linear(x)
 
 
@@ -479,7 +501,7 @@ class SeqCLRRecurrentEncoder(torch.nn.Module):
         # final output generation
         x = self.final_linear(x) # TO-DO: should I include the final h in this as well (via concatenation)??? if so, need to change final_linear and preceding code in forward pass
         x = x.permute(1, 2, 0)
-        return x, torch.sum(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.sum(x, dim=1) for downstream
+        return x, torch.mean(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.mean(x, dim=1) for downstream
 
 class SeqCLRConvolutionalResidualBlock(torch.nn.Module):
     """
@@ -590,7 +612,7 @@ class SeqCLRConvolutionalEncoder(torch.nn.Module):
 
         # x = self.final_linear(x.view(orig_batch_num, -1))
 
-        return x, torch.sum(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.sum(x, dim=1) for downstream
+        return x, torch.mean(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.mean(x, dim=1) for downstream
 
 class SeqCLRDecoder(torch.nn.Module):
     """
@@ -653,7 +675,7 @@ class SeqCLRDecoder(torch.nn.Module):
                              x_embed_3[:,-1,:]]), 
                       dim=1
         )
-        print("x shape == ", x.shape)
+        # print("x shape == ", x.shape)
         # h = torch.cat(tuple([h_1, h_2, h_3]), dim=2)# TO-DO: do we need to remember this hidden, or not?
         # c = torch.cat(tuple([c_1, c_2, c_3]), dim=2)# TO-DO: do we need to remember this hidden, or not?
 
@@ -668,16 +690,45 @@ class SeqCLRDecoder(torch.nn.Module):
         out = self.final_linear(x) # TO-DO: should I include the final h & c in this as well (via concatenation)??? if so, need to change final_linear and preceding code in forward pass
         return out
 
+class SQNet(torch.nn.Module):
+    """
+    see proceedings.mlr.press/v136/mohsenvand20a/mohsenvand20a.pdf
+    """
+    def __init__(self, encoder_type, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100, num_upstream_decode_features=32):
+        super(SQNet, self).__init__()
+
+        if encoder_type == "recurrent":
+            self.embed_model = SeqCLRRecurrentEncoder(num_channels, temporal_len, dropout_rate=dropout_rate, embed_dim=embed_dim)
+        elif encoder_type == "convolutional":
+            self.embed_model = SeqCLRConvolutionalEncoder(num_channels, temporal_len, dropout_rate=dropout_rate, embed_dim=embed_dim)
+        else:
+            raise ValueError("encoder_type "+str(encoder_type)+" not supported")
+
+        self.decode_model = SeqCLRDecoder(num_channels, 
+                                     temporal_len, 
+                                     dropout_rate=dropout_rate, 
+                                     num_upstream_decode_features=num_upstream_decode_features
+        )
+
+        self.encoder_type = encoder_type
+        pass
+    
+    def forward(self, x): 
+        x = self.embed_model(x)
+        x = self.decode_model(x)
+        return x
+
+
 class PhaseSwapFCN(torch.nn.Module):
     """
     See Section 3 of arxiv.org/pdf/2009.07664.pdf for description and
     see Figure 1.b in arxiv.org/pdf/1611.06455.pdf for most of diagram
     """
-    def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100):
+    def __init__(self, num_channels, dropout_rate=0.5, embed_dim=100):
         super(PhaseSwapFCN, self).__init__()
         self.BATCH_DIM = 0
-        self.CHANNEL_DIM = 1
-        self.TEMPORAL_DIM = 2
+        self.CHANNEL_DIM = 2
+        self.TEMPORAL_DIM = 1
 
         self.K8 = 8
         self.K5 = 5
@@ -686,6 +737,19 @@ class PhaseSwapFCN(torch.nn.Module):
         self.D_INTERNAL_128 = 128
         self.D_INTERNAL_256 = 256
         self.D_OUT = embed_dim
+
+        # self.conv_block_1 = torch.nn.Sequential(
+        #     torch.nn.ReflectionPad1d(((self.K128//2)-1, self.K128//2)), 
+        #     torch.nn.Conv1d(num_channels, self.D_INTERNAL_100, self.K128)
+        # )
+        # self.conv_block_2 = torch.nn.Sequential(
+        #     torch.nn.ReflectionPad1d(((self.K64//2)-1, self.K64//2)), 
+        #     torch.nn.Conv1d(num_channels, self.D_INTERNAL_100, self.K64)
+        # )
+        # self.conv_block_3 = torch.nn.Sequential(
+        #     torch.nn.ReflectionPad1d(((self.K16//2)-1, self.K16//2)), 
+        #     torch.nn.Conv1d(num_channels, self.D_INTERNAL_50, self.K16)
+        # )
 
         self.conv_block_1 = torch.nn.Sequential(
             torch.nn.ReflectionPad1d(((self.K8//2)-1, self.K8//2)), 
@@ -711,6 +775,8 @@ class PhaseSwapFCN(torch.nn.Module):
     
     def forward(self, x):
         # print("\nPhaseSwapFCN: x.shape == ", x.shape)
+        x = x.permute(self.BATCH_DIM, self.CHANNEL_DIM, self.TEMPORAL_DIM)
+        # print("PhaseSwapFCN: x.shape == ", x.shape)
         x = self.conv_block_1(x)
         # print("PhaseSwapFCN: x.shape == ", x.shape)
         x = self.conv_block_2(x)
@@ -719,22 +785,19 @@ class PhaseSwapFCN(torch.nn.Module):
         # print("PhaseSwapFCN: x_resid.shape == ", x.shape)
         x = self.avg_pool(x)
         # print("PhaseSwapFCN: out.shape == ", x.shape)
-        return x, torch.sum(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.sum(x, dim=1) for downstream
-
+        return x, torch.mean(x, dim=2)#self.TEMPORAL_DIM) # x is used for upstream task and torch.mean(x, dim=2) for downstream
 
 class PhaseSwapUpstreamDecoder(torch.nn.Module):
     """
     See Section 3 of arxiv.org/pdf/2009.07664.pdf for description
     """
-    def __init__(self, hidden_dim, temporal_len, dropout_rate=0.5, out_dim=32):
+    def __init__(self, hidden_dim, temporal_len, dropout_rate=0.5):
         super(PhaseSwapUpstreamDecoder, self).__init__()
         self.BATCH_DIM = 0
         self.CHANNEL_DIM = 1
         self.TEMPORAL_DIM = 2
         
-        self.D_OUT = out_dim
-        self.linear = torch.nn.Linear(hidden_dim*(temporal_len//hidden_dim), out_dim)
-        # self.softmax = torch.nn.functional.softmax()
+        self.linear = torch.nn.Linear(hidden_dim*(temporal_len//hidden_dim), 1)
         pass
     
     def forward(self, x):
@@ -743,6 +806,29 @@ class PhaseSwapUpstreamDecoder(torch.nn.Module):
         # print("PhaseSwapUpstreamDecoder: x.shape == ", x.shape)
         x = self.linear(x)
         # print("PhaseSwapUpstreamDecoder: x.shape == ", x.shape)
-        x = torch.nn.functional.softmax(x)
+        # x = torch.nn.functional.softmax(x)
         # print("PhaseSwapUpstreamDecoder: x.shape == ", x.shape)
+        return x
+
+class PSNet(torch.nn.Module):
+    """
+    see arxiv.org/pdf/2009.07664.pdf
+    """
+    def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100):
+        super(PSNet, self).__init__()
+
+        self.embed_model = PhaseSwapFCN(num_channels, 
+                                         dropout_rate=0.5, 
+                                         embed_dim=embed_dim
+        )
+
+        self.decode_model = PhaseSwapUpstreamDecoder(embed_dim, 
+                                                     temporal_len, 
+                                                     dropout_rate=0.5
+        )
+        pass
+    
+    def forward(self, x): 
+        x, _ = self.embed_model(x) # The second output is ignored because it is meant for the downstream task
+        x = self.decode_model(x)
         return x

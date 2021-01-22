@@ -417,6 +417,119 @@ class CPCDataset(torch.utils.data.Dataset):
 
 # CONTRASTIVE PREDICTIVE CODING (CPC) CODE BLOCK #############################################################
 
+# PHASESWAP (PS) CODE BLOCK ##################################################################################
+class PSDataset(torch.utils.data.Dataset):
+    def __init__(self, cached_ps_dataset, path=None, total_points=None, window_size=None, sfreq=None, 
+                 windowed_data_name="_Windowed_Pretext_Preprocess.npy", windowed_start_time_name="_Windowed_StartTime.npy"):
+        if cached_ps_dataset is not None:
+            self.init_from_cached_data(cached_ps_dataset)
+        else:
+            self.init_params_from_scratch(path, 
+                                          total_points, 
+                                          window_size, 
+                                          sfreq, 
+                                          windowed_data_name, 
+                                          windowed_start_time_name
+            )
+        pass 
+
+    def init_params_from_scratch(self, path, total_points, window_size, sfreq, 
+                                 windowed_data_name="_Windowed_Pretext_Preprocess.npy", 
+                                 windowed_start_time_name="_Windowed_StartTime.npy"):
+        data_path = path + windowed_data_name
+        self.data = np.load(data_path)
+        # print("PSDataset.init_params_from_scratch(): data size == ", self.data.size)
+        # print("PSDataset.init_params_from_scratch(): data shape == ", self.data.shape)
+        data_path = path + windowed_start_time_name
+        self.start_times = np.load(data_path)
+        self.total_windows = len(self.data)
+        self.pairs, self.labels = self.get_samples_and_labels(size=total_points, window_size=window_size)
+        pass
+    
+    def init_from_cached_data(self, cached_rp_dataset):
+        cached_dataset = None
+        with open(cached_rp_dataset, 'rb') as infile:
+            cached_dataset = pkl.load(infile)
+        
+        self.data = cached_dataset['data']
+        # print("RPDataset.init_from_cached_data(): data size == ", self.data.size)
+        # print("RPDataset.init_from_cached_data(): data shape == ", self.data.shape)
+        self.start_times = cached_dataset['start_times']
+        self.total_windows = cached_dataset['total_windows']
+        self.pairs = cached_dataset['pairs']
+        self.labels = cached_dataset['labels']
+
+        del cached_dataset
+        pass
+
+    def save_as_dictionary(self, path):
+        with open(path, 'wb') as outfile:
+            pkl.dump({
+                'data': self.data,
+                'start_times': self.start_times,
+                'total_windows': self.total_windows,
+                'pairs': self.pairs,
+                'labels': self.labels,
+            }, outfile)
+
+    def __len__(self):
+        return len(self.labels)
+    
+    def __getitem__(self, index):
+        y = torch.from_numpy(np.array([self.labels[index]])).float()
+
+        x = None
+        if self.pairs[index][1] is not np.nan: 
+            x1 = torch.from_numpy(self.data[self.pairs[index][0], :, :]).float()
+            x2 = torch.from_numpy(self.data[self.pairs[index][1], :, :]).float()
+            x = self.phase_swap_operator(x1, x2)
+            x = torch.from_numpy(x.real).float() # see https://numpy.org/doc/stable/reference/generated/numpy.real.html
+        else:
+            x = torch.from_numpy(self.data[self.pairs[index][0], :, :]).float()
+
+        return x, y
+    
+    def get_samples_and_labels(self, size, window_size):
+        """
+        Gets the pairs of inputs (x1, x2) and output labels for the pretext task. 'Positive' windows are given a label of +1
+        and negative windows are provided a label of -1. From Section 3 of arxiv.org/pdf/2009.07664.pdf 
+        """
+        pairs = [[None, None] for _ in range(size)] # np.zeros((size, 2), dtype=int)
+        labels = np.zeros(size)
+
+        for i in range(size):
+            anchor_val = None
+            second_val = None
+            label = None
+
+            anchor_val = np.random.randint(low=0, high=self.total_windows)
+            if random.random() < 0.5: # decide whether or not to generate positive labeled data sample
+                label = 1
+                second_val = np.random.randint(low=0, high=self.total_windows)
+            else:
+                label = -1
+                second_val = np.nan
+
+            pairs[i][0] = anchor_val
+            pairs[i][1] = second_val
+            labels[i] = label
+
+        # print("PSDataset.get_samples_and_labels: labels shape == ", labels.shape)
+        return pairs, labels
+    
+    def phase_swap_operator(self, x1, x2):
+        """
+        Implementation of the PhaseSwap Operator from Section 3 of arxiv.org/pdf/2009.07664.pdf 
+        see also 
+         - https://stackoverflow.com/questions/47307862/why-do-scipy-and-numpy-fft-plots-look-different for reasoning behind using numpy over scipy
+         - https://numpy.org/doc/stable/reference/generated/numpy.fft.fft.html#numpy.fft.fft for fft
+         - https://numpy.org/doc/stable/reference/generated/numpy.fft.ifft.html#numpy.fft.ifft for ifft
+         - https://stackoverflow.com/questions/43019136/how-to-get-phase-fft-of-a-signal-can-i-get-phase-in-time-domain for magnitude/phase computations
+        """
+        return np.fft.ifft(np.abs(np.fft.fft(x1))*np.angle(np.fft.fft(x2)))
+
+# PHASESWAP (PS) CODE BLOCK ##################################################################################
+
 # UPSTREAM DATA LOADER BLOCK #################################################################################
 def load_SSL_Dataset(task_id, cached_datasets_list_dir=None, total_points_val=2000, tpos_val=30, tneg_val=120, 
                      window_size=3, sfreq=1000, Nc=10, Np=16, Nb=4, max_Nb_iters=1000, total_points_factor=0.05, 
@@ -424,7 +537,7 @@ def load_SSL_Dataset(task_id, cached_datasets_list_dir=None, total_points_val=20
                      windowed_start_time_name="_Windowed_StartTime.npy", data_folder_name="Mouse_Training_Data", 
                      data_root_name="Windowed_Data", file_names_list="training_names.txt", 
                      train_portion=0.7, val_portion=0.2, test_portion=0.1):
-    assert task_id in ['RP', 'TS', 'CPC']
+    assert task_id in ['RP', 'TS', 'CPC', 'PS']
     root = os.path.join(data_folder_name, data_root_name, "")
 
     datasets_list = []
@@ -440,6 +553,8 @@ def load_SSL_Dataset(task_id, cached_datasets_list_dir=None, total_points_val=20
                 datasets_list.append(TSDataset(curr_path))
             elif task_id == 'CPC':
                 datasets_list.append(CPCDataset(curr_path))
+            elif task_id == 'PS':
+                datasets_list.append(PSDataset(curr_path))
             else:
                 raise ValueError("load_SSL_Dataset: task_id == "+str(task_id)+" not recognized")
     else:
@@ -484,6 +599,17 @@ def load_SSL_Dataset(task_id, cached_datasets_list_dir=None, total_points_val=20
                             Nb=Nb, # this used to be 2 not 4, but 4 would work better
                             max_Nb_iters=max_Nb_iters, 
                             total_points_factor=total_points_factor, 
+                            windowed_data_name=windowed_data_name, 
+                            windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'PS':
+                datasets_list.append(
+                    PSDataset(None, 
+                            path=data_file, 
+                            total_points=total_points_val, 
+                            window_size=window_size, 
+                            sfreq=sfreq, 
                             windowed_data_name=windowed_data_name, 
                             windowed_start_time_name=windowed_start_time_name
                     )
