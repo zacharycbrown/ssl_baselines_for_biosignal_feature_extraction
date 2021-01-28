@@ -184,7 +184,7 @@ class DownstreamNet(nn.Module):
         self.embedders = nn.ModuleList()
         for embedder_type, embedder in embedders:
             # print("DownstreamNet.__init__ : embedder_type == ", embedder_type)
-            if embedder_type not in ["RP", "TS", "CPC", "PS"]:
+            if embedder_type not in ["RP", "TS", "CPC", "PS", "SQ"]:
                 raise ValueError("Embedder type "+str(embedder_type)+" not supported")
             self.embedder_types.append(embedder_type)
             self.embedders.append(embedder)
@@ -207,7 +207,7 @@ class DownstreamNet(nn.Module):
                 # print("\tDownstreamNet.forward : RUNNING RS, TS, OR CPC MODEL")
                 embedded_x = self.embedders[i](x)
             else:
-                # print("\tDownstreamNet.forward : RUNNING PS MODEL")
+                # print("\tDownstreamNet.forward : RUNNING PS OR SQ MODEL")
                 _, embedded_x = self.embedders[i](x)
             # print("DownstreamNet.forward : embedded_x shape == ", embedded_x.shape)
             x_embeds.append(embedded_x)
@@ -449,6 +449,7 @@ class SeqCLRRecurrentEncoder(torch.nn.Module):
     def forward(self, x):
         orig_temporal_len = x.size(self.TEMPORAL_DIM)
         orig_batch_num = x.size(self.BATCH_DIM)
+        x = x.permute(self.BATCH_DIM, self.CHANNEL_DIM, self.TEMPORAL_DIM)
         
         # prepare x for processing
         # see https://discuss.pytorch.org/t/how-to-downsample-a-time-series/78485
@@ -501,7 +502,7 @@ class SeqCLRRecurrentEncoder(torch.nn.Module):
         # final output generation
         x = self.final_linear(x) # TO-DO: should I include the final h in this as well (via concatenation)??? if so, need to change final_linear and preceding code in forward pass
         x = x.permute(1, 2, 0)
-        return x, torch.mean(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.mean(x, dim=1) for downstream
+        return x, torch.mean(x, dim=2) # x is used for upstream task and torch.mean(x, dim=1) for downstream
 
 class SeqCLRConvolutionalResidualBlock(torch.nn.Module):
     """
@@ -534,16 +535,16 @@ class SeqCLRConvolutionalEncoder(torch.nn.Module):
     def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100):
         super(SeqCLRConvolutionalEncoder, self).__init__()
         self.BATCH_DIM = 0
-        self.CHANNEL_DIM = 1
-        self.TEMPORAL_DIM = 2
+        self.CHANNEL_DIM = 2 # 1
+        self.TEMPORAL_DIM = 1 # 2
 
-        self.K128 = 128
-        self.K64 = 64
-        self.K16 = 16
+        self.K128 = 64 # 128 # 64 # 32 # 128 # 64 # 128 # 32 # 16 # 32 # 128
+        self.K64 = 32 # 64 # 32 # 16 # 64 # 32 # 64 # 16 # 8 # 16 # 64
+        self.K16 = 8 # 16 # 8 # 4 # 4 # 8 # 16 # 4 # 2 # 4 # 16
 
-        self.D_INTERNAL_100 = 100
-        self.D_INTERNAL_50 = 50
-        self.D_INTERNAL_250 = 250
+        self.D_INTERNAL_100 = 20 # 100 # 10 # 20 # 100 # 10 # 5 # 10 # 100
+        self.D_INTERNAL_50 = 10 # 50 # 5 # 10 # 50 # 5 # 5 # 50
+        self.D_INTERNAL_250 = 50 # 250 # 25 # 50 # 250 # 25 # 15 # 25 # 250
         self.D_OUT = embed_dim
 
         self.conv_block_1 = torch.nn.Sequential(
@@ -579,6 +580,7 @@ class SeqCLRConvolutionalEncoder(torch.nn.Module):
     
     def forward(self, x):
         orig_batch_num = x.size(0)
+        x = x.permute(self.BATCH_DIM, self.CHANNEL_DIM, self.TEMPORAL_DIM)
 
         # embed x using various convolutional modules
         x_embed_1 = self.conv_block_1(x)
@@ -612,7 +614,7 @@ class SeqCLRConvolutionalEncoder(torch.nn.Module):
 
         # x = self.final_linear(x.view(orig_batch_num, -1))
 
-        return x, torch.mean(x, dim=self.TEMPORAL_DIM) # x is used for upstream task and torch.mean(x, dim=1) for downstream
+        return x, torch.mean(x, dim=2) # x is used for upstream task and torch.mean(x, dim=1) for downstream
 
 class SeqCLRDecoder(torch.nn.Module):
     """
@@ -624,18 +626,21 @@ class SeqCLRDecoder(torch.nn.Module):
         self.BATCH_DIM = 0
         self.CHANNEL_DIM = 1
 
-        self.bdlstm_1 = torch.nn.LSTM(num_channels, 256, bidirectional=True)
-        self.bdlstm_2 = torch.nn.LSTM(num_channels, 128, bidirectional=True)
-        self.bdlstm_3 = torch.nn.LSTM(num_channels, 64, bidirectional=True)
+        self.out_features_256 = 32 # 256
+        self.out_features_128 = 16 # 128
+        self.out_features_64 = 8 # 64
+        self.bdlstm_1 = torch.nn.LSTM(num_channels, self.out_features_256, bidirectional=True)
+        self.bdlstm_2 = torch.nn.LSTM(num_channels, self.out_features_128, bidirectional=True)
+        self.bdlstm_3 = torch.nn.LSTM(num_channels, self.out_features_64, bidirectional=True)
 
-        self.x_linear_1 = torch.nn.Linear(2*2*256+2*2*128+2*2*64, 128)
+        self.x_linear_1 = torch.nn.Linear(2*2*self.out_features_256+2*2*self.out_features_128+2*2*self.out_features_64, self.out_features_128)
         self.x_relu_1 = torch.nn.ReLU()
         # self.h_linear_1 = torch.nn.Linear(2*2*256+2*2*128+2*2*64, 128)
         # self.h_relu_1 = torch.nn.ReLU()
         # self.c_linear_1 = torch.nn.Linear(2*2*256+2*2*128+2*2*64, 128)
         # self.c_relu_1 = torch.nn.ReLU()
 
-        self.final_linear = torch.nn.Linear(128, num_upstream_decode_features)
+        self.final_linear = torch.nn.Linear(self.out_features_128, num_upstream_decode_features)
 
         self.num_channels = num_channels
         self.temporal_len = temporal_len
@@ -643,6 +648,7 @@ class SeqCLRDecoder(torch.nn.Module):
         self.num_upstream_decode_features = num_upstream_decode_features
     
     def forward(self, x):
+        # print("SeqCLRDecoder.forward: x shape == ", x.shape)
         orig_temporal_len = x.size(self.TEMPORAL_DIM)
         orig_batch_num = x.size(self.BATCH_DIM)
         
@@ -650,12 +656,17 @@ class SeqCLRDecoder(torch.nn.Module):
         # see https://discuss.pytorch.org/t/how-to-downsample-a-time-series/78485
         # and https://discuss.pytorch.org/t/f-interpolate-weird-behaviour/36088
         x_down_1 = torch.nn.functional.interpolate(x, size=(x.size(self.TEMPORAL_DIM)//2))
+        # print("SeqCLRDecoder.forward: x_down_1 shape == ", x_down_1.shape)
         intermed_temporal_len = x_down_1.size(self.TEMPORAL_DIM)
         x_down_2 = torch.nn.functional.interpolate(x_down_1, size=(x_down_1.size(self.TEMPORAL_DIM)//2))
+        # print("SeqCLRDecoder.forward: x_down_2 shape == ", x_down_2.shape)
         
         x = x.permute(self.TEMPORAL_DIM, self.BATCH_DIM, self.CHANNEL_DIM)
+        # print("SeqCLRDecoder.forward: x shape == ", x.shape)
         x_down_1 = x_down_1.permute(self.TEMPORAL_DIM, self.BATCH_DIM, self.CHANNEL_DIM)
+        # print("SeqCLRDecoder.forward: x_down_1 shape == ", x_down_1.shape)
         x_down_2 = x_down_2.permute(self.TEMPORAL_DIM, self.BATCH_DIM, self.CHANNEL_DIM)
+        # print("SeqCLRDecoder.forward: x_down_2 shape == ", x_down_2.shape)
 
         # embed x using various gru modules
         x_embed_1, (h_1, c_1) = self.bdlstm_1(x) # TO-DO: do we need to remember this hidden, or not?
@@ -688,6 +699,7 @@ class SeqCLRDecoder(torch.nn.Module):
         
         # final output generation
         out = self.final_linear(x) # TO-DO: should I include the final h & c in this as well (via concatenation)??? if so, need to change final_linear and preceding code in forward pass
+        # raise NotImplementedError()
         return out
 
 class SQNet(torch.nn.Module):
@@ -699,22 +711,29 @@ class SQNet(torch.nn.Module):
 
         if encoder_type == "recurrent":
             self.embed_model = SeqCLRRecurrentEncoder(num_channels, temporal_len, dropout_rate=dropout_rate, embed_dim=embed_dim)
-        elif encoder_type == "convolutional":
-            self.embed_model = SeqCLRConvolutionalEncoder(num_channels, temporal_len, dropout_rate=dropout_rate, embed_dim=embed_dim)
-        else:
-            raise ValueError("encoder_type "+str(encoder_type)+" not supported")
-
-        self.decode_model = SeqCLRDecoder(num_channels, 
+            self.decode_model = SeqCLRDecoder(embed_dim, 
                                      temporal_len, 
                                      dropout_rate=dropout_rate, 
                                      num_upstream_decode_features=num_upstream_decode_features
-        )
+            )
+        elif encoder_type == "convolutional":
+            self.embed_model = SeqCLRConvolutionalEncoder(num_channels, temporal_len, dropout_rate=dropout_rate, embed_dim=embed_dim)
+            self.decode_model = SeqCLRDecoder(embed_dim, 
+                                     temporal_len, 
+                                     dropout_rate=dropout_rate, 
+                                     num_upstream_decode_features=num_upstream_decode_features
+            )
+        elif encoder_type == "simplified":
+            self.embed_model = PhaseSwapFCN(num_channels, dropout_rate=dropout_rate, embed_dim=embed_dim)
+            self.decode_model = PhaseSwapUpstreamDecoder(embed_dim, temporal_len, dropout_rate=dropout_rate, decode_dim=num_upstream_decode_features)
+        else:
+            raise ValueError("encoder_type "+str(encoder_type)+" not supported")
 
         self.encoder_type = encoder_type
         pass
     
     def forward(self, x): 
-        x = self.embed_model(x)
+        x, _ = self.embed_model(x)
         x = self.decode_model(x)
         return x
 
@@ -791,13 +810,13 @@ class PhaseSwapUpstreamDecoder(torch.nn.Module):
     """
     See Section 3 of arxiv.org/pdf/2009.07664.pdf for description
     """
-    def __init__(self, hidden_dim, temporal_len, dropout_rate=0.5):
+    def __init__(self, hidden_dim, temporal_len, dropout_rate=0.5, decode_dim=1):
         super(PhaseSwapUpstreamDecoder, self).__init__()
         self.BATCH_DIM = 0
         self.CHANNEL_DIM = 1
         self.TEMPORAL_DIM = 2
         
-        self.linear = torch.nn.Linear(hidden_dim*(temporal_len//hidden_dim), 1)
+        self.linear = torch.nn.Linear(hidden_dim*(temporal_len//hidden_dim), decode_dim)
         pass
     
     def forward(self, x):
