@@ -12,6 +12,7 @@ Implementations of various published works on self-supervised learning approache
 ## Requirements:
  - Pytorch (and dependencies)
  - CUDA
+ - Currently only tested on Windows 10 OS with NVIDIA GPU and Pytorch (therefore any models/pipelines reliant on LSTMs/GRUs have not been fully tested - see https://github.com/pytorch/pytorch/issues/27837)
 
 ## File Descriptions:
 
