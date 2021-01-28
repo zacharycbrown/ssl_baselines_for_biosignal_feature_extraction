@@ -30,8 +30,10 @@ Implementations of various published works on self-supervised learning approache
  - Stager_net_practice
  - Embedders for RP, TS, CPC
  - Downstream classifier model
+ - PhaseSwap FCN Embedder and Upstream Decoder
+ - SeqCLR Embedders (Convolutional and Recurrent) as well as Upstream Decoder (though currently the PhaseSwap FCN Embedder and Upstream Decoder - slightly modified - architectures are being used due to limited computational resources)
 #### data_loaders.py
- - data loading function for training all three upstream tasks (RP, TS, CPC)
+ - data loading function for training RP, TS, CPC, PhaseSwap, and SeqCLR tasks
  - data loading function for downstream task
 #### train.py
  - upstream training functions
@@ -39,8 +41,7 @@ Implementations of various published works on self-supervised learning approache
 
 ## To-Do's 
 (last updated 01/12/2021)
- - Define NN models necessary for implementing SACL, SeqCLR, TIDNet, and PhaseSwap
- - Implement data preprocessing and loading for SACL and SeqCLR
- - Implement data preprocessing and loading for TIDNet and PhaseSwap
- - Implement training loops for all upstream tasks (SACL, SeqCLR, TIDNet, and PhaseSwap)
- - Implement down-stream training loops for all upstream pretrained models (SACL, SeqCLR, TIDNet, and PhaseSwap)
+ - Define NN models necessary TIDNet
+ - Implement data preprocessing and loading for SACL and TIDNet
+ - Implement training loops for remaining upstream tasks (SACL and TIDNet)
+ - Implement down-stream training loops for remaining upstream pretrained models (SACL, SeqCLR, and TIDNet)
