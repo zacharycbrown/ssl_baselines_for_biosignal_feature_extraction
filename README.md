@@ -42,7 +42,4 @@ Implementations of various published works on self-supervised learning approache
 
 ## To-Do's 
 (last updated 01/28/2021)
- - Define NN models necessary TIDNet
- - Implement data preprocessing and loading for SACL and TIDNet
- - Implement training loops for remaining upstream tasks (SACL and TIDNet)
- - Implement down-stream training loops for remaining upstream pretrained models (SACL, SeqCLR, and TIDNet)
+ - Define/Implement necessary NN models, data preprocessing/loading, upstream training loops, and downstream training loops for TIDNet
