@@ -41,5 +41,5 @@ Implementations of various published works on self-supervised learning approache
  - downstream training (with cross-validation)
 
 ## To-Do's 
-(last updated 01/28/2021)
+(last updated 02/06/2021)
  - Define/Implement necessary NN models, data preprocessing/loading, upstream training loops, and downstream training loops for TIDNet
