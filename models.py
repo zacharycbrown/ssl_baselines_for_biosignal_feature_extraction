@@ -184,7 +184,7 @@ class DownstreamNet(nn.Module):
         self.embedders = nn.ModuleList()
         for embedder_type, embedder in embedders:
             # print("DownstreamNet.__init__ : embedder_type == ", embedder_type)
-            if embedder_type not in ["RP", "TS", "CPC", "PS", "SQ"]:
+            if embedder_type not in ["RP", "TS", "CPC", "PS", "SQ", "SA"]:
                 raise ValueError("Embedder type "+str(embedder_type)+" not supported")
             self.embedder_types.append(embedder_type)
             self.embedders.append(embedder)
@@ -203,8 +203,8 @@ class DownstreamNet(nn.Module):
         x_embeds = []
         for i in range(self.num_embedders):
             embedded_x = None
-            if self.embedder_types[i] in ["RP", "TS", "CPC"]:
-                # print("\tDownstreamNet.forward : RUNNING RS, TS, OR CPC MODEL")
+            if self.embedder_types[i] in ["RP", "TS", "CPC", "SA"]:
+                # print("\tDownstreamNet.forward : RUNNING RS, TS, CPC, OR SA MODEL")
                 embedded_x = self.embedders[i](x)
             else:
                 # print("\tDownstreamNet.forward : RUNNING PS OR SQ MODEL")
@@ -262,14 +262,14 @@ class SACLFlatten(torch.nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
 
-class SACLNet(torch.nn.Module):
+class SACLEncoder(torch.nn.Module):
     """
     NOTE: IF YOU ARE GETTING SHAPE ERRORS, CHANGE THE SHAPE OF THE FINAL LINEAR LAYER IN THE EMBEDDER FIRST (BY CHANGING THE INTEGER-DIVISION DENOMINATOR)
     see  appendix Figure A.2 in arxiv.org/pdf/2007.04871.pdf for diagram
     """
-    def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100, num_upstream_decode_features=20):
-        super(SACLNet, self).__init__()
-        self.embed_model = torch.nn.Sequential(torch.nn.Conv1d(num_channels, num_channels//2, temporal_len//32), 
+    def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100):
+        super(SACLEncoder, self).__init__()
+        self.sequential_process = torch.nn.Sequential(torch.nn.Conv1d(num_channels, num_channels//2, temporal_len//32), 
                                                SACLResBlock(num_channels//2, num_channels//2, temporal_len//16), 
                                                torch.nn.MaxPool1d(4),  
                                                SACLResBlock(num_channels//2, num_channels, temporal_len//16), 
@@ -277,8 +277,36 @@ class SACLNet(torch.nn.Module):
                                                SACLResBlock(num_channels, num_channels*2, temporal_len//32), 
                                                torch.nn.ELU(), 
                                                SACLFlatten(), # see https://stackoverflow.com/questions/53953460/how-to-flatten-input-in-nn-sequential-in-pytorch
-                                               torch.nn.Linear(num_channels*2*(temporal_len//16), embed_dim) # added to make it easier for different data sets with different shapes to be run through model
+                                               torch.nn.Linear(num_channels*(2**1)*(int(temporal_len/16.5)), embed_dim) # added to make it easier for different data sets with different shapes to be run through model
         )
+
+        self.dropout_rate = dropout_rate
+        self.embed_dim = embed_dim
+        pass
+    
+    def forward(self, x):
+        x = x.permute(0, 2, 1)
+        out = self.sequential_process(x)
+        return out
+
+class SACLNet(torch.nn.Module):
+    """
+    NOTE: IF YOU ARE GETTING SHAPE ERRORS, CHANGE THE SHAPE OF THE FINAL LINEAR LAYER IN THE EMBEDDER FIRST (BY CHANGING THE INTEGER-DIVISION DENOMINATOR)
+    see  appendix Figure A.2 in arxiv.org/pdf/2007.04871.pdf for diagram
+    """
+    def __init__(self, num_channels, temporal_len, dropout_rate=0.5, embed_dim=100, num_upstream_decode_features=20):
+        super(SACLNet, self).__init__()
+        self.embed_model = SACLEncoder(num_channels, temporal_len, dropout_rate=0.5, embed_dim=100)
+        # self.embed_model = torch.nn.Sequential(torch.nn.Conv1d(num_channels, num_channels//2, temporal_len//32), 
+        #                                        SACLResBlock(num_channels//2, num_channels//2, temporal_len//16), 
+        #                                        torch.nn.MaxPool1d(4),  
+        #                                        SACLResBlock(num_channels//2, num_channels, temporal_len//16), 
+        #                                        torch.nn.MaxPool1d(4),  
+        #                                        SACLResBlock(num_channels, num_channels*2, temporal_len//32), 
+        #                                        torch.nn.ELU(), 
+        #                                        SACLFlatten(), # see https://stackoverflow.com/questions/53953460/how-to-flatten-input-in-nn-sequential-in-pytorch
+        #                                        torch.nn.Linear(num_channels*(2**1)*(int(temporal_len/16.5)), embed_dim) # added to make it easier for different data sets with different shapes to be run through model
+        # )
         self.decode_model = torch.nn.Sequential(torch.nn.Linear(embed_dim, embed_dim//2), 
                                                 torch.nn.ReLU(), 
                                                 torch.nn.Linear(embed_dim//2, embed_dim//2), 
@@ -294,6 +322,7 @@ class SACLNet(torch.nn.Module):
     
     def forward(self, x):
         # print("\nSACLNet: x.shape == ", x.shape, "\n")
+        # x = x.permute(0, 2, 1)
         x_embedded = self.embed_model(x)
         # print("\nSACLNet: x_embedded.shape == ", x_embedded.shape, "\n")
         out = self.decode_model(x_embedded)
@@ -312,7 +341,8 @@ class SACLAdversary(torch.nn.Module):
                                                 torch.nn.ReLU(), 
                                                 torch.nn.Linear(embed_dim//2, embed_dim//2), 
                                                 torch.nn.ReLU(), 
-                                                torch.nn.Linear(embed_dim//2, num_subjects)
+                                                torch.nn.Linear(embed_dim//2, num_subjects), 
+                                                torch.nn.Sigmoid() # ADDED BY ZAC TO ADDRESS NANs IN ADVERSARIAL LOSS
         )
         pass
     
