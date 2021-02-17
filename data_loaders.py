@@ -1236,6 +1236,180 @@ def load_SSL_Dataset(task_id, cached_datasets_list_dir=None, total_points_val=20
                                                                  generator=torch.Generator().manual_seed(0)
     )
     return train_set, val_set, test_set
+
+def load_SSL_Dataset_Based_On_Subjects(task_id, cached_datasets_list_dir=None, total_points_val=2000, tpos_val=30, tneg_val=120, 
+                                        window_size=3, sfreq=1000, Nc=10, Np=16, Nb=4, max_Nb_iters=1000, total_points_factor=0.05, 
+                                        bw=5, randomized_augmentation=False, num_channels=11, temporal_len=3000, # items relevant to SQ/SA data loading
+                                        NUM_AUGMENTATIONS=2, perturb_orig_signal=True, # items unique to SA data loading
+                                        windowed_data_name="_Windowed_Pretext_Preprocess.npy", 
+                                        windowed_start_time_name="_Windowed_StartTime.npy", data_folder_name="Mouse_Training_Data", 
+                                        data_root_name="Windowed_Data", file_names_list="training_names.txt", 
+                                        train_portion=0.7, val_portion=0.2, test_portion=0.1, random_seed=0):
+    assert task_id in ['RP', 'TS', 'CPC', 'PS', 'SQ', 'SA']
+    root = os.path.join(data_folder_name, data_root_name, "")
+
+    datasets_list = []
+
+    print("load_SSL_Dataset_Based_On_Subjects: loading data")
+    if cached_datasets_list_dir is not None:
+        cached_datasets_file_names = os.listdir(cached_datasets_list_dir)
+        for name in cached_datasets_file_names:
+            curr_path = os.path.join(cached_datasets_list_dir, name, "")
+            if task_id == 'RP':
+                datasets_list.append(RPDataset(curr_path))
+            elif task_id == 'TS':
+                datasets_list.append(TSDataset(curr_path))
+            elif task_id == 'CPC':
+                datasets_list.append(CPCDataset(curr_path))
+            elif task_id == 'PS':
+                datasets_list.append(PSDataset(curr_path))
+            elif task_id == 'SQ':
+                datasets_list.append(SQDataset(curr_path))
+            elif task_id == 'SA':
+                datasets_list.append(SQDataset(curr_path))
+            else:
+                raise ValueError("load_SSL_Dataset_Based_On_Subjects: task_id == "+str(task_id)+" not recognized")
+    else:
+        f = open(os.path.join(file_names_list), 'r')
+        lines = f.readlines()
+        print("load_SSL_Dataset_Based_On_Subjects: ASSUMING EACH LINE IN ", str(file_names_list), " REPRESENTS A DIFFERENT, INDIVIDUAL TEST SUBJECT")
+        for i, line in enumerate(lines):
+            record_name = line.strip()
+            # print("load_SSL_Dataset_Based_On_Subjects: processing ", record_name)
+            data_file = root+record_name+os.sep+record_name
+            if task_id == 'RP':
+                datasets_list.append(
+                    RPDataset(None, 
+                            path=data_file, 
+                            total_points=total_points_val, 
+                            tpos=tpos_val, 
+                            tneg=tneg_val, 
+                            window_size=window_size, 
+                            sfreq=sfreq, 
+                            windowed_data_name=windowed_data_name, 
+                            windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'TS':
+                datasets_list.append(
+                    TSDataset(None, 
+                            path=data_file, 
+                            total_points=total_points_val, 
+                            tpos=tpos_val, 
+                            tneg=tneg_val, 
+                            window_size=window_size, 
+                            sfreq=sfreq, 
+                            windowed_data_name=windowed_data_name, 
+                            windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'CPC':
+                datasets_list.append(
+                    CPCDataset(None, 
+                            path=data_file, 
+                            Nc=Nc, 
+                            Np=Np, 
+                            Nb=Nb, # this used to be 2 not 4, but 4 would work better
+                            max_Nb_iters=max_Nb_iters, 
+                            total_points_factor=total_points_factor, 
+                            windowed_data_name=windowed_data_name, 
+                            windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'PS':
+                datasets_list.append(
+                    PSDataset(None, 
+                            path=data_file, 
+                            total_points=total_points_val, 
+                            window_size=window_size, 
+                            sfreq=sfreq, 
+                            windowed_data_name=windowed_data_name, 
+                            windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'SQ':
+                # print("task_id == SQ")
+                datasets_list.append(
+                    SQDataset(None, 
+                              path=data_file, 
+                              total_points=total_points_val, 
+                              window_size=window_size, 
+                              sfreq=sfreq, 
+                              bw=bw, 
+                              randomized_augmentation=randomized_augmentation, 
+                              num_channels=num_channels, 
+                              temporal_len=temporal_len, 
+                              windowed_data_name=windowed_data_name, 
+                              windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            elif task_id == 'SA':
+                # print("task_id == SA")
+                datasets_list.append(
+                    SADataset(None, 
+                              path=data_file, 
+                              total_points=total_points_val, 
+                              window_size=window_size, 
+                              sfreq=sfreq, 
+                              bw=bw, 
+                              randomized_augmentation=randomized_augmentation, 
+                              num_channels=num_channels, 
+                              temporal_len=temporal_len, 
+                              NUM_AUGMENTATIONS=NUM_AUGMENTATIONS, 
+                              perturb_orig_signal=perturb_orig_signal, 
+                              individual_id=i, 
+                              num_individuals_in_label=len(lines), 
+                              windowed_data_name=windowed_data_name, 
+                              windowed_start_time_name=windowed_start_time_name
+                    )
+                )
+            else:
+                raise ValueError("load_SSL_Dataset_Based_On_Subjects: task_id == "+str(task_id)+" not recognized")
+        f.close()
+    
+    shuffle_inds = [i for i in range(len(datasets_list))]
+    random.Random(random_seed).shuffle(shuffle_inds) # see https://stackoverflow.com/questions/19306976/python-shuffling-with-a-parameter-to-get-the-same-result
+    datasets_list = datasets_list[shuffle_inds]
+    
+    # combined_dataset = torch.utils.data.ConcatDataset(datasets_list)
+
+    # data_len = len(combined_dataset)
+    # train_len = int(data_len*train_portion)
+    # val_len = int(data_len*val_portion)
+    # test_len = int(data_len - (train_len+val_len))
+
+    # # see https://pytorch.org/docs/stable/data.html
+    # train_set, val_set, test_set = torch.utils.data.random_split(combined_dataset, 
+    #                                                              [train_len, val_len, test_len], 
+    #                                                              generator=torch.Generator().manual_seed(0)
+    # )
+
+    num_train_subjects = max(1, int(train_portion*len(datasets_list)))
+    num_val_subjects = max(1, int(val_portion*len(datasets_list)))
+    num_test_subjects = max(1, int((1. - (train_portion+val_portion))*len(datasets_list)))
+
+    train_set = torch.utils.data.ConcatDataset(datasets_list[:num_train_subjects])
+    train_set = torch.utils.data.random_split(train_set, 
+                                              [len(train_set)], 
+                                              generator=torch.Generator().manual_seed(random_seed)
+    )
+    val_set = torch.utils.data.ConcatDataset(datasets_list[num_train_subjects:num_train_subjects+num_val_subjects])
+    val_set = torch.utils.data.random_split(val_set, 
+                                            [len(val_set)], 
+                                            generator=torch.Generator().manual_seed(random_seed)
+    )
+    test_set = torch.utils.data.ConcatDataset(datasets_list[num_train_subjects+num_val_subjects:])
+    test_set = torch.utils.data.random_split(test_set, 
+                                             [len(test_set)], 
+                                             generator=torch.Generator().manual_seed(random_seed)
+    )
+
+    train_val_test_split_subjects = {"train_set_subjects": shuffle_inds[:num_train_subjects], 
+                                     "val_set_subjects": shuffle_inds[num_train_subjects:num_train_subjects+num_val_subjects], 
+                                     "test_set_subjects": shuffle_inds[num_train_subjects+num_val_subjects:], 
+    }
+
+    return train_set, val_set, test_set, train_val_test_split_subjects
 # UPSTREAM DATA LOADER BLOCK #################################################################################
 
 
