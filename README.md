@@ -1,6 +1,9 @@
 # SSL Baselines for Biosignal Feature Extraction
 Implementations of various published works on self-supervised learning approaches to biosignal feature extraction.
 
+## Dataset (Update March, 2023)
+The dataset used in this repository has recently been made available upon individual request (please direct requests privately to zac.brown@duke.edu).
+
 ### References:
  - https://github.com/jstranne/mouse_self_supervision
  - Banville et al's arxiv.org/pdf/2007.16104.pdf for RP, TS, and CPC upstream SSL tasks
