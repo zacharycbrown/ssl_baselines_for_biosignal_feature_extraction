@@ -1,9 +1,6 @@
 # SSL Baselines for Biosignal Feature Extraction
 Implementations of various published works on self-supervised learning approaches to biosignal feature extraction.
 
-## Dataset (Update March, 2023)
-The dataset used in this repository has recently been made available upon individual request (please direct requests privately to zac.brown@duke.edu).
-
 ### References:
  - https://github.com/jstranne/mouse_self_supervision
  - Banville et al's arxiv.org/pdf/2007.16104.pdf for RP, TS, and CPC upstream SSL tasks
@@ -11,6 +8,9 @@ The dataset used in this repository has recently been made available upon indivi
  - Mohsenvad et al's http://proceedings.mlr.press/v136/mohsenvand20a/mohsenvand20a.pdf for SeqCLR upstream SSL pipeline
  - The ThinkerInvariance (TIDNet) SSL pipeline described in https://iopscience.iop.org/article/10.1088/1741-2552/abb7a7/pdf by Demetres Kostas and Frank Rudzicz, and their associated code at https://github.com/SPOClab-ca/ThinkerInvariance
  - PhaseSwap as described in https://arxiv.org/pdf/2009.07664.pdf by Abdelhak Lemkhenter and Paolo Favaro
+
+## Dataset (Update March, 2023)
+The dataset used in this repository has recently been made available upon individual request (please direct requests privately to zac.brown@duke.edu).
 
 ## Requirements:
  - Pytorch (and dependencies)
