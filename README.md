@@ -9,8 +9,8 @@ Implementations of various published works on self-supervised learning approache
  - The ThinkerInvariance (TIDNet) SSL pipeline described in https://iopscience.iop.org/article/10.1088/1741-2552/abb7a7/pdf by Demetres Kostas and Frank Rudzicz, and their associated code at https://github.com/SPOClab-ca/ThinkerInvariance
  - PhaseSwap as described in https://arxiv.org/pdf/2009.07664.pdf by Abdelhak Lemkhenter and Paolo Favaro
 
-## Dataset (Update March, 2023)
-The dataset used in this repository has recently been made available upon individual request (please direct requests privately to zac.brown@duke.edu).
+## Dataset (Update May, 2023)
+The dataset used in this repository has recently been made available online at the following link: https://research.repository.duke.edu/concern/datasets/zc77sr31x?locale=en
 
 ## Requirements:
  - Pytorch (and dependencies)
